@@ -1,7 +1,7 @@
 #![no_std]
 
-use embedded_hal::blocking::delay::DelayUs;
-use embedded_hal::digital::v2::{InputPin, OutputPin};
+use embassy_time::Timer;
+use embedded_hal::digital::{InputPin, OutputPin};
 
 mod address;
 pub mod commands;
@@ -33,9 +33,9 @@ pub struct OneWire<T> {
 }
 
 impl<T, E> OneWire<T>
-where
-    T: InputPin<Error = E>,
-    T: OutputPin<Error = E>,
+    where
+        T: InputPin<Error=E>,
+        T: OutputPin<Error=E>,
 {
     pub fn new(pin: T) -> OneWireResult<OneWire<T>, E> {
         let mut one_wire = OneWire { pin };
@@ -72,153 +72,153 @@ where
         self.pin.is_low().map_err(|err| OneWireError::PinError(err))
     }
 
-    fn wait_for_high(&self, delay: &mut impl DelayUs<u16>) -> OneWireResult<(), E> {
+    async fn wait_for_high(&self) -> OneWireResult<(), E> {
         // wait up to 250 µs for the bus to become high (from the pull-up resistor)
         for _ in 0..125 {
             if self.is_bus_high()? {
                 return Ok(());
             }
-            delay.delay_us(2);
+            Timer::after_micros(2).await;
         }
         Err(OneWireError::BusNotHigh)
     }
 
     /// Sends a reset pulse, then returns true if a device is present
-    pub fn reset(&mut self, delay: &mut impl DelayUs<u16>) -> OneWireResult<bool, E> {
-        self.wait_for_high(delay)?;
+    pub async fn reset(&mut self) -> OneWireResult<bool, E> {
+        self.wait_for_high().await?;
 
         self.set_bus_low()?;
-        delay.delay_us(480); // Maxim recommended wait time
+        Timer::after_micros(480).await; // Maxim recommended wait time
 
         self.release_bus()?;
-        delay.delay_us(70); // Maxim recommended wait time
+        Timer::after_micros(70).await; // Maxim recommended wait time
 
         let device_present = self.is_bus_low()?;
 
-        delay.delay_us(410); // Maxim recommended wait time
+        Timer::after_micros(410).await; // Maxim recommended wait time
         Ok(device_present)
     }
 
-    pub fn read_bit(&mut self, delay: &mut impl DelayUs<u16>) -> OneWireResult<bool, E> {
+    pub async fn read_bit(&mut self) -> OneWireResult<bool, E> {
         self.set_bus_low()?;
-        delay.delay_us(6); // Maxim recommended wait time
+        Timer::after_micros(6).await; // Maxim recommended wait time
 
         self.release_bus()?;
-        delay.delay_us(9); // Maxim recommended wait time
+        // Maxim recommended wait time
+        Timer::after_micros(9).await;
 
         let bit_value = self.is_bus_high()?;
-        delay.delay_us(55); // Maxim recommended wait time
+        // Maxim recommended wait time
+        Timer::after_micros(55).await;
         Ok(bit_value)
     }
 
-    pub fn read_byte(&mut self, delay: &mut impl DelayUs<u16>) -> OneWireResult<u8, E> {
+    pub async fn read_byte(&mut self) -> OneWireResult<u8, E> {
         let mut output: u8 = 0;
         for _ in 0..8 {
             output >>= 1;
-            if self.read_bit(delay)? {
+            if self.read_bit().await? {
                 output |= 0x80;
             }
         }
         Ok(output)
     }
-    pub fn read_bytes(
+    pub async fn read_bytes(
         &mut self,
         output: &mut [u8],
-        delay: &mut impl DelayUs<u16>,
     ) -> OneWireResult<(), E> {
         for i in 0..output.len() {
-            output[i] = self.read_byte(delay)?;
+            output[i] = self.read_byte().await?;
         }
         Ok(())
     }
 
-    pub fn write_1_bit(&mut self, delay: &mut impl DelayUs<u16>) -> OneWireResult<(), E> {
+    pub async fn write_1_bit(&mut self) -> OneWireResult<(), E> {
         self.set_bus_low()?;
-        delay.delay_us(6); // Maxim recommended wait time
+        // Maxim recommended wait time
+        Timer::after_micros(6).await;
 
         self.release_bus()?;
-        delay.delay_us(64); // Maxim recommended wait time
+        // Maxim recommended wait time
+        Timer::after_micros(64).await;
         Ok(())
     }
 
-    pub fn write_0_bit(&mut self, delay: &mut impl DelayUs<u16>) -> OneWireResult<(), E> {
+    pub async fn write_0_bit(&mut self) -> OneWireResult<(), E> {
         self.set_bus_low()?;
-        delay.delay_us(60); // Maxim recommended wait time
+        // Maxim recommended wait time
+        Timer::after_micros(60).await;
 
         self.release_bus()?;
-        delay.delay_us(10); // Maxim recommended wait time
+        // Maxim recommended wait time
+        Timer::after_micros(10).await;
         Ok(())
     }
 
-    pub fn write_bit(
+    pub async fn write_bit(
         &mut self,
         value: bool,
-        delay: &mut impl DelayUs<u16>,
     ) -> OneWireResult<(), E> {
         if value {
-            self.write_1_bit(delay)
+            self.write_1_bit().await
         } else {
-            self.write_0_bit(delay)
+            self.write_0_bit().await
         }
     }
 
-    pub fn write_byte(
+    pub async fn write_byte(
         &mut self,
         mut value: u8,
-        delay: &mut impl DelayUs<u16>,
     ) -> OneWireResult<(), E> {
         for _ in 0..8 {
-            self.write_bit(value & 0x01 == 0x01, delay)?;
+            self.write_bit(value & 0x01 == 0x01).await?;
             value >>= 1;
         }
         Ok(())
     }
 
-    pub fn write_bytes(
+    pub async fn write_bytes(
         &mut self,
         bytes: &[u8],
-        delay: &mut impl DelayUs<u16>,
     ) -> OneWireResult<(), E> {
         for i in 0..bytes.len() {
-            self.write_byte(bytes[i], delay)?;
+            self.write_byte(bytes[i]).await?;
         }
         Ok(())
     }
 
     /// Address a specific device. All others will wait for a reset pulse.
     /// This should only be called after a reset, and should be immediately followed by another command
-    pub fn match_address(
+    pub async fn match_address(
         &mut self,
         address: &Address,
-        delay: &mut impl DelayUs<u16>,
     ) -> OneWireResult<(), E> {
-        self.write_byte(commands::MATCH_ROM, delay)?;
-        self.write_bytes(&address.0.to_le_bytes(), delay)?;
+        self.write_byte(commands::MATCH_ROM).await?;
+        self.write_bytes(&address.0.to_le_bytes()).await?;
         Ok(())
     }
 
     /// Address all devices on the bus simultaneously.
     /// This should only be called after a reset, and should be immediately followed by another command
-    pub fn skip_address(&mut self, delay: &mut impl DelayUs<u16>) -> OneWireResult<(), E> {
-        self.write_byte(commands::SKIP_ROM, delay)?;
+    pub async fn skip_address(&mut self) -> OneWireResult<(), E> {
+        self.write_byte(commands::SKIP_ROM).await?;
         Ok(())
     }
 
     /// Sends a reset, followed with either a SKIP_ROM or MATCH_ROM (with an address), and then the supplied command
     /// This should be followed by any reading/writing, if needed by the command used
-    pub fn send_command(
+    pub async fn send_command(
         &mut self,
         command: u8,
         address: Option<&Address>,
-        delay: &mut impl DelayUs<u16>,
     ) -> OneWireResult<(), E> {
-        self.reset(delay)?;
+        self.reset().await?;
         if let Some(address) = address {
-            self.match_address(address, delay)?;
+            self.match_address(address).await?;
         } else {
-            self.skip_address(delay)?;
+            self.skip_address().await?;
         }
-        self.write_byte(command, delay)?;
+        self.write_byte(command).await?;
         Ok(())
     }
 
@@ -227,17 +227,13 @@ where
     /// There is no requirement to immediately finish iterating all devices, but if devices are
     /// added / removed / change alarm state, the search may return an error or fail to find a device
     /// Device addresses will always be returned in the same order (lowest to highest, Little Endian)
-    pub fn devices<'a, 'b, D>(
-        &'a mut self,
+    pub fn devices<D>(
+        &mut self,
         only_alarming: bool,
-        delay: &'b mut D,
-    ) -> DeviceSearch<'a, 'b, T, D>
-    where
-        D: DelayUs<u16>,
+    ) -> DeviceSearch<T>
     {
         DeviceSearch {
             onewire: self,
-            delay,
             state: None,
             finished: false,
             only_alarming,
@@ -250,11 +246,10 @@ where
     /// There is no time limit for continuing a search, but if devices are
     /// added / removed / change alarm state, the search may return an error or fail to find a device
     /// Device addresses will always be returned in the same order (lowest to highest, Little Endian)
-    pub fn device_search(
+    pub async fn device_search(
         &mut self,
         search_state: Option<&SearchState>,
         only_alarming: bool,
-        delay: &mut impl DelayUs<u16>,
     ) -> OneWireResult<Option<(Address, SearchState)>, E> {
         if let Some(search_state) = search_state {
             if search_state.discrepancies == 0 {
@@ -262,13 +257,13 @@ where
             }
         }
 
-        if !self.reset(delay)? {
+        if !self.reset().await? {
             return Ok(None);
         }
         if only_alarming {
-            self.write_byte(commands::SEARCH_ALARM, delay)?;
+            self.write_byte(commands::SEARCH_ALARM).await?;
         } else {
-            self.write_byte(commands::SEARCH_NORMAL, delay)?;
+            self.write_byte(commands::SEARCH_NORMAL).await?;
         }
 
         let mut last_discrepancy_index: u8 = 0;
@@ -279,8 +274,8 @@ where
         if let Some(search_state) = search_state {
             // follow up to the last discrepancy
             for bit_index in 0..search_state.last_discrepancy_index {
-                let _false_bit = !self.read_bit(delay)?;
-                let _true_bit = !self.read_bit(delay)?;
+                let _false_bit = !self.read_bit().await?;
+                let _true_bit = !self.read_bit().await?;
                 let was_discrepancy_bit =
                     (search_state.discrepancies & (1_u64 << (bit_index as u64))) != 0;
                 if was_discrepancy_bit {
@@ -290,20 +285,20 @@ where
                     (search_state.address & (1_u64 << (bit_index as u64))) != 0;
 
                 // choose the same as last time
-                self.write_bit(previous_chosen_bit, delay)?;
+                self.write_bit(previous_chosen_bit).await?;
             }
             address = search_state.address;
             // This is the discrepancy bit. False is always chosen to start, so choose true this time
             {
-                let false_bit = !self.read_bit(delay)?;
-                let true_bit = !self.read_bit(delay)?;
+                let false_bit = !self.read_bit().await?;
+                let true_bit = !self.read_bit().await?;
                 if !(false_bit && true_bit) {
                     // A different response was received than last search
                     return Err(OneWireError::UnexpectedResponse);
                 }
                 let address_mask = 1_u64 << (search_state.last_discrepancy_index as u64);
                 address |= address_mask;
-                self.write_bit(true, delay)?;
+                self.write_bit(true).await?;
             }
 
             //keep all discrepancies except the last one
@@ -316,8 +311,8 @@ where
             continue_start_bit = 0;
         }
         for bit_index in continue_start_bit..64 {
-            let false_bit = !self.read_bit(delay)?;
-            let true_bit = !self.read_bit(delay)?;
+            let false_bit = !self.read_bit().await?;
+            let true_bit = !self.read_bit().await?;
             let chosen_bit = match (false_bit, true_bit) {
                 (false, false) => {
                     // No devices responded to the search request
@@ -345,7 +340,7 @@ where
             } else {
                 address &= !address_mask;
             }
-            self.write_bit(chosen_bit, delay)?;
+            self.write_bit(chosen_bit).await?;
         }
         crc::check_crc8(&address.to_le_bytes())?;
         Ok(Some((
@@ -359,29 +354,25 @@ where
     }
 }
 
-pub struct DeviceSearch<'a, 'b, T, D> {
+pub struct DeviceSearch<'a, T> {
     onewire: &'a mut OneWire<T>,
-    delay: &'b mut D,
     state: Option<SearchState>,
     finished: bool,
     only_alarming: bool,
 }
 
-impl<'a, 'b, T, E, D> Iterator for DeviceSearch<'a, 'b, T, D>
-where
-    T: InputPin<Error = E>,
-    T: OutputPin<Error = E>,
-    D: DelayUs<u16>,
+impl<'a, T, E> DeviceSearch<'a, T>
+    where
+        T: InputPin<Error=E>,
+        T: OutputPin<Error=E>
 {
-    type Item = OneWireResult<Address, E>;
-
-    fn next(&mut self) -> Option<Self::Item> {
+    pub async fn next(&mut self) -> Option<OneWireResult<Address, E>> {
         if self.finished {
             return None;
         }
         let result =
             self.onewire
-                .device_search(self.state.as_ref(), self.only_alarming, self.delay);
+                .device_search(self.state.as_ref(), self.only_alarming).await;
         match result {
             Ok(Some((address, search_state))) => {
                 self.state = Some(search_state);
