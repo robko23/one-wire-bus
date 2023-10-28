@@ -1,6 +1,6 @@
 #![no_std]
 
-use embassy_time::Timer;
+use embassy_time::{block_for, Duration, Timer};
 use embedded_hal::digital::{InputPin, OutputPin};
 
 mod address;
@@ -99,109 +99,116 @@ impl<T, E> OneWire<T>
         Ok(device_present)
     }
 
-    pub async fn read_bit(&mut self) -> OneWireResult<bool, E> {
-        self.set_bus_low()?;
-        Timer::after_micros(3).await; // Maxim recommended wait time
+    pub fn read_bit(&mut self) -> OneWireResult<bool, E> {
+        critical_section::with(|_| {
+            self.set_bus_low()?;
+            // Maxim recommended wait time
+            block_for(Duration::from_micros(3));
 
-        self.release_bus()?;
-        // Maxim recommended wait time
-        Timer::after_micros(10).await;
+            self.release_bus()?;
+            // Maxim recommended wait time
+            block_for(Duration::from_micros(10));
 
-        let bit_value = self.is_bus_high()?;
-        // Maxim recommended wait time
-        Timer::after_micros(53).await;
-        Ok(bit_value)
+            let bit_value = self.is_bus_high()?;
+            // Maxim recommended wait time
+            block_for(Duration::from_micros(53));
+            Ok(bit_value)
+        })
     }
 
-    pub async fn read_byte(&mut self) -> OneWireResult<u8, E> {
+    pub fn read_byte(&mut self) -> OneWireResult<u8, E> {
         let mut output: u8 = 0;
         for _ in 0..8 {
             output >>= 1;
-            if self.read_bit().await? {
+            if self.read_bit()? {
                 output |= 0x80;
             }
         }
         Ok(output)
     }
-    pub async fn read_bytes(
+    pub fn read_bytes(
         &mut self,
         output: &mut [u8],
     ) -> OneWireResult<(), E> {
         for i in 0..output.len() {
-            output[i] = self.read_byte().await?;
+            output[i] = self.read_byte()?;
         }
         Ok(())
     }
 
-    pub async fn write_1_bit(&mut self) -> OneWireResult<(), E> {
-        self.set_bus_low()?;
-        // Maxim recommended wait time
-        Timer::after_micros(6).await;
+    pub fn write_1_bit(&mut self) -> OneWireResult<(), E> {
+        critical_section::with(|_| {
+            self.set_bus_low()?;
+            // Maxim recommended wait time
+            block_for(Duration::from_micros(10));
 
-        self.release_bus()?;
-        // Maxim recommended wait time
-        Timer::after_micros(64).await;
-        Ok(())
+            self.release_bus()?;
+            // Maxim recommended wait time
+            block_for(Duration::from_micros(55));
+            Ok(())
+        })
     }
 
-    pub async fn write_0_bit(&mut self) -> OneWireResult<(), E> {
-        self.set_bus_low()?;
-        // Maxim recommended wait time
-        Timer::after_micros(60).await;
+    pub fn write_0_bit(&mut self) -> OneWireResult<(), E> {
+        critical_section::with(|_| {
+            self.set_bus_low()?;
+            // Maxim recommended wait time
+            block_for(Duration::from_micros(65));
 
-        self.release_bus()?;
-        // Maxim recommended wait time
-        Timer::after_micros(10).await;
-        Ok(())
+            self.release_bus()?;
+            // Maxim recommended wait time
+            block_for(Duration::from_micros(5));
+            Ok(())
+        })
     }
 
-    pub async fn write_bit(
+    pub fn write_bit(
         &mut self,
         value: bool,
     ) -> OneWireResult<(), E> {
         if value {
-            self.write_1_bit().await
+            self.write_1_bit()
         } else {
-            self.write_0_bit().await
+            self.write_0_bit()
         }
     }
 
-    pub async fn write_byte(
+    pub fn write_byte(
         &mut self,
         mut value: u8,
     ) -> OneWireResult<(), E> {
         for _ in 0..8 {
-            self.write_bit(value & 0x01 == 0x01).await?;
+            self.write_bit(value & 0x01 == 0x01)?;
             value >>= 1;
         }
         Ok(())
     }
 
-    pub async fn write_bytes(
+    pub fn write_bytes(
         &mut self,
         bytes: &[u8],
     ) -> OneWireResult<(), E> {
         for i in 0..bytes.len() {
-            self.write_byte(bytes[i]).await?;
+            self.write_byte(bytes[i])?;
         }
         Ok(())
     }
 
     /// Address a specific device. All others will wait for a reset pulse.
     /// This should only be called after a reset, and should be immediately followed by another command
-    pub async fn match_address(
+    pub fn match_address(
         &mut self,
         address: &Address,
     ) -> OneWireResult<(), E> {
-        self.write_byte(commands::MATCH_ROM).await?;
-        self.write_bytes(&address.0.to_le_bytes()).await?;
+        self.write_byte(commands::MATCH_ROM)?;
+        self.write_bytes(&address.0.to_le_bytes())?;
         Ok(())
     }
 
     /// Address all devices on the bus simultaneously.
     /// This should only be called after a reset, and should be immediately followed by another command
-    pub async fn skip_address(&mut self) -> OneWireResult<(), E> {
-        self.write_byte(commands::SKIP_ROM).await?;
+    pub fn skip_address(&mut self) -> OneWireResult<(), E> {
+        self.write_byte(commands::SKIP_ROM)?;
         Ok(())
     }
 
@@ -214,11 +221,11 @@ impl<T, E> OneWire<T>
     ) -> OneWireResult<(), E> {
         self.reset().await?;
         if let Some(address) = address {
-            self.match_address(address).await?;
+            self.match_address(address)?;
         } else {
-            self.skip_address().await?;
+            self.skip_address()?;
         }
-        self.write_byte(command).await?;
+        self.write_byte(command)?;
         Ok(())
     }
 
@@ -261,9 +268,9 @@ impl<T, E> OneWire<T>
             return Ok(None);
         }
         if only_alarming {
-            self.write_byte(commands::SEARCH_ALARM).await?;
+            self.write_byte(commands::SEARCH_ALARM)?;
         } else {
-            self.write_byte(commands::SEARCH_NORMAL).await?;
+            self.write_byte(commands::SEARCH_NORMAL)?;
         }
 
         let mut last_discrepancy_index: u8 = 0;
@@ -274,8 +281,8 @@ impl<T, E> OneWire<T>
         if let Some(search_state) = search_state {
             // follow up to the last discrepancy
             for bit_index in 0..search_state.last_discrepancy_index {
-                let _false_bit = !self.read_bit().await?;
-                let _true_bit = !self.read_bit().await?;
+                let _false_bit = !self.read_bit()?;
+                let _true_bit = !self.read_bit()?;
                 let was_discrepancy_bit =
                     (search_state.discrepancies & (1_u64 << (bit_index as u64))) != 0;
                 if was_discrepancy_bit {
@@ -285,20 +292,20 @@ impl<T, E> OneWire<T>
                     (search_state.address & (1_u64 << (bit_index as u64))) != 0;
 
                 // choose the same as last time
-                self.write_bit(previous_chosen_bit).await?;
+                self.write_bit(previous_chosen_bit)?;
             }
             address = search_state.address;
             // This is the discrepancy bit. False is always chosen to start, so choose true this time
             {
-                let false_bit = !self.read_bit().await?;
-                let true_bit = !self.read_bit().await?;
+                let false_bit = !self.read_bit()?;
+                let true_bit = !self.read_bit()?;
                 if !(false_bit && true_bit) {
                     // A different response was received than last search
                     return Err(OneWireError::UnexpectedResponse);
                 }
                 let address_mask = 1_u64 << (search_state.last_discrepancy_index as u64);
                 address |= address_mask;
-                self.write_bit(true).await?;
+                self.write_bit(true)?;
             }
 
             //keep all discrepancies except the last one
@@ -311,8 +318,8 @@ impl<T, E> OneWire<T>
             continue_start_bit = 0;
         }
         for bit_index in continue_start_bit..64 {
-            let false_bit = !self.read_bit().await?;
-            let true_bit = !self.read_bit().await?;
+            let false_bit = !self.read_bit()?;
+            let true_bit = !self.read_bit()?;
             let chosen_bit = match (false_bit, true_bit) {
                 (false, false) => {
                     // No devices responded to the search request
@@ -340,7 +347,7 @@ impl<T, E> OneWire<T>
             } else {
                 address &= !address_mask;
             }
-            self.write_bit(chosen_bit).await?;
+            self.write_bit(chosen_bit)?;
         }
         crc::check_crc8(&address.to_le_bytes())?;
         Ok(Some((
