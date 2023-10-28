@@ -101,15 +101,15 @@ impl<T, E> OneWire<T>
 
     pub async fn read_bit(&mut self) -> OneWireResult<bool, E> {
         self.set_bus_low()?;
-        Timer::after_micros(6).await; // Maxim recommended wait time
+        Timer::after_micros(3).await; // Maxim recommended wait time
 
         self.release_bus()?;
         // Maxim recommended wait time
-        Timer::after_micros(9).await;
+        Timer::after_micros(10).await;
 
         let bit_value = self.is_bus_high()?;
         // Maxim recommended wait time
-        Timer::after_micros(55).await;
+        Timer::after_micros(53).await;
         Ok(bit_value)
     }
 
