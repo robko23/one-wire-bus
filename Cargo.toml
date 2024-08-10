@@ -13,10 +13,11 @@ A Rust implementation of the 1-Wire protocol for embedded-hal
 """
 
 [dependencies]
-embedded-hal = {version = "1.0.0-rc.1"}
+embedded-hal = {version = "1.0.0"}
 critical-section = "1.1.2"
 
 [dependencies.embassy-time]
-version = "0.1.5"
+version = "0.3.2"
+rev = "37d7b0cd06b7a5d952d2e7de173b10ab32d96c5a"
 git = "https://github.com/embassy-rs/embassy.git"
-features = ["defmt", "unstable-traits"]
+features = ["defmt"]
